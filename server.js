@@ -10,7 +10,7 @@ voidpirates.on("player.connected", function(player) {
 	console.log("Player connected event");
 });
 
-voidpirates.on("player.disconnection", function(player) {
+voidpirates.on("player.disconnected", function(player) {
 	console.log("Player disconnected event");
 });
 

@@ -134,7 +134,7 @@ exports.start = function(port) {
 		socket.on("close", function(e) {
 			console.log("Client disconnected");
 			var player = getPlayer(socket);
-			eventEmitter.emit("player.disconnected", player);
+			eventEmitter.emit("player.disconnection", player);
 			// Remove the player from the players array
 			removePlayer(socket);
 			// Notify all other players of quit event
