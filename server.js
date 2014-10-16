@@ -24,6 +24,7 @@ voidpirates.on("player.positionChange", function(evt) {
 	} else if (evt.direction === "down") {
 		evt.player.y -= 8;
 	}	
+	voidpirates.sendPositionUpdates(evt.player);
 });
 
 voidpirates.on("player.spawnNewPlayer", function(player) {

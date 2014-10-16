@@ -1,3 +1,7 @@
+require("nodetime").profile({
+	accountKey: '469f144b0de2d761e04c6a887858b6c30c867cb0', 
+	appName: 'voidpirates'
+});
 // Import node modules. These are contained in the node_modules directory.
 var dissolve = require("dissolve"),
     events = require("events"),
@@ -26,10 +30,10 @@ exports.start = function(port) {
 		console.log("Client connection from: " + socket.remoteAddress);
 		// Add the new connection to the player array
 		// TODO Make sure the assigned ID isn't already in the players array
-        	players.push({
-                	socket: socket,
-	                ip: socket.host,
-        	        id: Math.floor(Math.random() * 255),
+    players.push({
+    	socket: socket,
+	    ip: socket.host,
+      id: Math.floor(Math.random() * 255),
 			x: Math.floor(Math.random() * 800),
 			y: Math.floor(Math.random() * 600),
 			rx: 0.0,
@@ -43,6 +47,7 @@ exports.start = function(port) {
 			pong: false,
 			kicked: false,
 			timedout: false,
+			moved: false,
 			commands: []
         	});
 		// This event fires when we receive data on the socket
@@ -50,82 +55,64 @@ exports.start = function(port) {
 			// Now we need to parse the incoming packet
 			// TODO Add some method to make sure the incoming packet isn't
 			// too large
-			var parser = dissolve().loop(function(end) {
-				var goodPacket = true;
-				this.uint8("pkid").tap(function() {
-					// This essentially formats a JS object that will contain 
-					// all incoming packets. Only formatting code should go here.
-					switch (this.vars.pkid) {
-						case 0x00: this.uint8("protocol").uint8("playerid"); break;
-						case 0x01: break;
-						case 0x02: this.uint8("directionX").uint8("directionY"); break;
-						default:
-							// we don't understand the packet
-							console.log(socket.remoteAddress + " invalid packet");
-							goodPacket = false;
-							socket.terminate();
-					}
-				}).tap (function() { if (goodPacket) {
-					this.push(this.vars);
-					this.vars = {};
-				}});
-			});
-			// This event fires when the parser has finished interpreting all data
-			// We can now access the data it parsed in an easier way.
-			parser.on("readable", function() {
-				var e;
-				while (e = parser.read()) {
-					// Uncomment line below to view each incoming packet.
-					//console.log(e);
-					// Now we actually apply an action to each incoming packet.
-					var player = getPlayer(socket);
-					switch (e.pkid) {
-						case 0x00:
-							if (e.protocol != version) { // Client expecting different protocol
-								console.log(socket.remoteAddress + " bad protocol version");
-								// Send Error packet (error 0)
-								sendError(player, 0x00);
-								break;
-							}
-							if (e.playerid == 0) { 
-								// Client needs ID
-								// Send the client their automatically assigned id
-								sendUint8Packet(socket, new Uint8Array([0x00,player.id]));
-								e.playerid = player.id
-							} else if (e.playerid != 0) {
-								// Make sure the requested ID is not in use
-								if (checkDuplicateID(e.playerid)) {
-									// Send new ID
-									sendUint8Packet(socket, new Uint8Array([0x00,player.id]));
-								} else {
-									// Client-requested ID is good
-									sendUint8Packet(socket, new Uint8Array([0x00,e.playerid]));
-								}
-							}
-							// Now, spawn the player in the game.
-							player.id = e.playerid;
-							// Fire player.connected event
-							eventEmitter.emit("player.connected", player);
+			if (data.length === 0) { return; }
+			var player = getPlayer(socket);
+			switch (data[0]) {
+				case 0x00: 
+					if (data[1] != version) { // Client expecting different protocol
+           	console.log(socket.remoteAddress + " bad protocol version");
+           	// Send Error packet (error 0)
+            sendError(player, 0x00);
+          	break;
+          }
+          if (data[2] === 0) {
+            // Client needs ID
+         		// Send the client their automatically assigned id
+            sendUint8Packet(socket, new Uint8Array([0x00,player.id]));
+           	data[2] = player.id;
+          } else if (data[2] !== 0) {
+           	// Make sure the requested ID is not in use
+           	if (checkDuplicateID(data[2])) {
+            	// Send new ID
+              sendUint8Packet(socket, new Uint8Array([0x00,player.id]));
+            } else {
+              	// Client-requested ID is good
+              	sendUint8Packet(socket, new Uint8Array([0x00,data[2]]));
+            }
+        	}
+         	// Now, spawn the player in the game.
+          player.id = data[2];
+          // Fire player.connected event
+          eventEmitter.emit("player.connected", player);
 
-							// Send spawn packet for just the player
-							sendSpawnPacket(player, player); 
-							// Spawn existing players for the new player.		
-							// This also notifies existing players of the new player.
-							spawnExisting(player);
-							// New player is spawned, fire player.spawnNewPlayer event
-							eventEmitter.emit("player.spawnNewPlayer", player);
-							break;
-						case 0x01: 
-							player.pong = true;
-							break;
-						case 0x02: // Client Position Update
-							player.commands.push(e);
-							break;
-					}
-				}
-			});
-			// Write incoming packet to parser
-			parser.write(data);
+          // Send spawn packet for just the player
+          sendSpawnPacket(player, player);
+          // Spawn existing players for the new player.
+          // This also notifies existing players of the new player.
+         	spawnExisting(player);
+          // New player is spawned, fire player.spawnNewPlayer event
+          eventEmitter.emit("player.spawnNewPlayer", player);
+					break;
+			  case 0x01: 
+					player.pong = true;
+					break;
+			  case 0x02: 
+					player.moved = true;
+					if (data[1] === 1 && data[2] === 0) {
+          	// Move left
+            eventEmitter.emit("player.positionChange", {direction:"left",player:player});
+           } else if (data[1] === 2 && data[2] === 0) {
+             // Move right
+             eventEmitter.emit("player.positionChange", {direction:"right",player:player});
+           } else if (data[1] === 0 && data[2] === 1) {
+             // Move up
+             eventEmitter.emit("player.positionChange", {direction:"up",player:player});
+           } else if (data[1] === 0 && data[2] === 2) {
+             // Move down
+             eventEmitter.emit("player.positionChange", {direction:"down",player:player});
+           }
+					break;
+			}
 		});
 		// Ping this player every 20 seconds
 		var interval = setInterval(function() {
@@ -170,44 +157,32 @@ function processPlayerCommands() {
 			var player = players[i];
 			// Process Position Changes
 			if (e.pkid == 0x02) {
-				if (e.directionX == 1 && e.directionY == 0) { 
-					// Move left
-					//players[i].x -= 8;
-					eventEmitter.emit("player.positionChange", {direction:"left",player:player});
-				} else if (e.directionX == 2 && e.directionY == 0) {
-					// Move right
-					//players[i].x += 8;
-					eventEmitter.emit("player.positionChange", {direction:"right",player:player});
-				} else if (e.directionX == 0 && e.directionY == 1) {
-					// Move up
-					//players[i].y += 8; 
-					eventEmitter.emit("player.positionChange", {direction:"up",player:player});
-				} else if (e.directionX == 0 && e.directionY == 2) {
-					// Move down
-					//players[i].y -= 8;
-					eventEmitter.emit("player.positionChange", {direction:"down",player:player});
-				}
+				sendPositionUpdates();
 			}
 		}
 		commands.length = 0;
 	}
 }
-function sendPositionUpdates() {
+exports.sendPositionUpdates = function(player) {
+	// player = the player that moved.
 		for (var i = 0; i < players.length; i++) {
 			for (var j = 0; j < players.length; j++) {
-				if (players[i].socket.readyState != 2) {
+				if (players[i].socket.readyState != 2 && players[j].moved) {
 					sendPositionPacket(players[i], players[j]);
 				}
 			}
 		}	 
-}
-function mainLoop() {
-	setInterval(function () {
-		processPlayerCommands();
-		sendPositionUpdates();
-	}, 1000/60);
-}
-mainLoop();
+		player.moved = false;
+};
+/*
+ * function mainLoop() {
+ * 	setInterval(function () {
+ * 		processPlayerCommands();
+ * 		//sendPositionUpdates();
+ * 	}, 1000/60);
+ * }
+ * mainLoop();
+ */
 
 // ========================
 
